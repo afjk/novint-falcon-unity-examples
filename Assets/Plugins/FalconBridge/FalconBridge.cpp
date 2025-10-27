@@ -14,9 +14,10 @@
 using namespace libnifalcon;
 
 // Global state
-static FalconDevice g_falcon;
+static FalconDevice* g_falcon = nullptr;
 static std::atomic<bool> g_running(false);
 static std::thread g_hapticThread;
+static std::mutex g_falconMutex;  // Protect device access
 
 // Contact parameters (thread-safe)
 static std::atomic<float> g_nx(0.0f);
@@ -50,15 +51,23 @@ static void HapticLoop()
     {
         try
         {
+            // Check if device is valid
+            if (g_falcon == nullptr)
+            {
+                std::cerr << "Device is null in haptic loop" << std::endl;
+                g_running.store(false);
+                break;
+            }
+
             // Step 1: Run IO loop FIRST to read device state from USB
             // Note: runIOLoop() can occasionally return false - this is normal
-            if (!g_falcon.runIOLoop())
+            if (!g_falcon->runIOLoop())
             {
                 int failures = g_consecutiveFailures.fetch_add(1) + 1;
                 if (failures > kIOLoopFailureLimit)
                 {
                     std::cerr << "IO loop failed " << failures << " times consecutively" << std::endl;
-                    std::cerr << "  Device error code: " << g_falcon.getErrorCode() << std::endl;
+                    std::cerr << "  Device error code: " << g_falcon->getErrorCode() << std::endl;
                     g_running.store(false);
                     break;
                 }
@@ -78,7 +87,7 @@ static void HapticLoop()
             }
 
             // Step 2: Get current position (after successful IO loop)
-            std::array<double, 3> pos = g_falcon.getPosition();
+            std::array<double, 3> pos = g_falcon->getPosition();
 
             // Debug: Log position every 100 successful loops (more frequent)
             int loopCount = g_successfulLoops.fetch_add(1) + 1;
@@ -97,7 +106,7 @@ static void HapticLoop()
             }
 
             // Step 3: Handle calibration or normal operation
-            auto firmware = g_falcon.getFalconFirmware();
+            auto firmware = g_falcon->getFalconFirmware();
             if (g_calibrating.load() && firmware != nullptr)
             {
                 // Calibration mode
@@ -146,13 +155,13 @@ static void HapticLoop()
                 }
 
                 // Set force (will be sent on next IO loop)
-                g_falcon.setForce(force);
+                g_falcon->setForce(force);
             }
             else
             {
                 // Not calibrated yet - set zero force
                 std::array<double, 3> force = {0.0, 0.0, 0.0};
-                g_falcon.setForce(force);
+                g_falcon->setForce(force);
             }
 
             // Run at 1kHz
@@ -175,35 +184,52 @@ FALCON_API bool InitFalcon()
 {
     try
     {
-        // Check if already running
+        // If already running, force shutdown first
         if (g_running.load())
         {
-            std::cerr << "Falcon already initialized" << std::endl;
-            return false;
+            std::cout << "Falcon already initialized, shutting down first..." << std::endl;
+            ShutdownFalcon();
+            // Wait a bit to ensure complete shutdown
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
         }
+
+        // Create a NEW device object for fresh USB state
+        std::cout << "Creating new device instance..." << std::endl;
+        std::lock_guard<std::mutex> lock(g_falconMutex);
+
+        if (g_falcon != nullptr)
+        {
+            delete g_falcon;
+            g_falcon = nullptr;
+        }
+
+        g_falcon = new FalconDevice();
+        std::cout << "New device instance created" << std::endl;
 
         // Set firmware type BEFORE opening device (critical!)
         std::cout << "Setting firmware type..." << std::endl;
-        g_falcon.setFalconFirmware<FalconFirmwareNovintSDK>();
+        g_falcon->setFalconFirmware<FalconFirmwareNovintSDK>();
 
         // Open the first Falcon device
         std::cout << "Opening Falcon device..." << std::endl;
-        if (!g_falcon.open(0))
+        if (!g_falcon->open(0))
         {
             std::cerr << "Failed to open Falcon device" << std::endl;
-            std::cerr << "  Error code: " << g_falcon.getErrorCode() << std::endl;
-            auto comm = g_falcon.getFalconComm();
+            std::cerr << "  Error code: " << g_falcon->getErrorCode() << std::endl;
+            auto comm = g_falcon->getFalconComm();
             if (comm != nullptr)
             {
                 std::cerr << "  Comm error code: " << comm->getErrorCode() << std::endl;
             }
+            delete g_falcon;
+            g_falcon = nullptr;
             return false;
         }
         std::cout << "Device opened successfully" << std::endl;
 
         // Load firmware if needed
         std::cout << "Checking firmware..." << std::endl;
-        if (!g_falcon.isFirmwareLoaded())
+        if (!g_falcon->isFirmwareLoaded())
         {
             std::cout << "Loading firmware..." << std::endl;
 
@@ -211,7 +237,7 @@ FALCON_API bool InitFalcon()
             for (int i = 0; i < 10; ++i)
             {
                 std::cout << "Firmware load attempt " << (i+1) << " / 10" << std::endl;
-                if (g_falcon.getFalconFirmware()->loadFirmware(false,
+                if (g_falcon->getFalconFirmware()->loadFirmware(false,
                     NOVINT_FALCON_NVENT_FIRMWARE_SIZE,
                     const_cast<uint8_t*>(NOVINT_FALCON_NVENT_FIRMWARE)))
                 {
@@ -219,18 +245,20 @@ FALCON_API bool InitFalcon()
                     break;
                 }
                 std::cerr << "Firmware load attempt " << (i+1) << " failed" << std::endl;
-                std::cerr << "  Device error code: " << g_falcon.getErrorCode() << std::endl;
-                auto firmware = g_falcon.getFalconFirmware();
+                std::cerr << "  Device error code: " << g_falcon->getErrorCode() << std::endl;
+                auto firmware = g_falcon->getFalconFirmware();
                 if (firmware != nullptr)
                 {
                     std::cerr << "  Firmware error code: " << firmware->getErrorCode() << std::endl;
                 }
             }
 
-            if (!g_falcon.isFirmwareLoaded())
+            if (!g_falcon->isFirmwareLoaded())
             {
                 std::cerr << "Failed to load firmware after retries" << std::endl;
-                g_falcon.close();
+                g_falcon->close();
+                delete g_falcon;
+                g_falcon = nullptr;
                 return false;
             }
         }
@@ -239,7 +267,7 @@ FALCON_API bool InitFalcon()
 
         // Set kinematic model for position conversion
         std::cout << "Setting kinematic model..." << std::endl;
-        g_falcon.setFalconKinematic<FalconKinematicStamper>();
+        g_falcon->setFalconKinematic<FalconKinematicStamper>();
 
         // Start haptic thread
         std::cout << "Starting haptic thread..." << std::endl;
@@ -252,11 +280,21 @@ FALCON_API bool InitFalcon()
     catch (const std::exception& e)
     {
         std::cerr << "Exception in InitFalcon: " << e.what() << std::endl;
+        if (g_falcon != nullptr)
+        {
+            delete g_falcon;
+            g_falcon = nullptr;
+        }
         return false;
     }
     catch (...)
     {
         std::cerr << "Unknown exception in InitFalcon" << std::endl;
+        if (g_falcon != nullptr)
+        {
+            delete g_falcon;
+            g_falcon = nullptr;
+        }
         return false;
     }
 }
@@ -267,14 +305,45 @@ FALCON_API void ShutdownFalcon()
     {
         std::cout << "Shutting down Falcon..." << std::endl;
 
-        // Stop haptic thread
+        // Stop haptic thread FIRST
         g_running.store(false);
+
+        // Wait for thread to finish
         if (g_hapticThread.joinable())
         {
+            std::cout << "Waiting for haptic thread to stop..." << std::endl;
             g_hapticThread.join();
+            std::cout << "Haptic thread stopped" << std::endl;
         }
 
-        // Reset contact parameters
+        // Close device and delete object
+        if (g_falcon != nullptr)
+        {
+            std::lock_guard<std::mutex> lock(g_falconMutex);
+
+            // Clear all forces before closing
+            std::array<double, 3> zeroForce = {0.0, 0.0, 0.0};
+            g_falcon->setForce(zeroForce);
+
+            // Run a few IO loops to ensure zero force is sent
+            for (int i = 0; i < 3; ++i)
+            {
+                g_falcon->runIOLoop();
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+
+            // Close device
+            std::cout << "Closing device..." << std::endl;
+            g_falcon->close();
+
+            // Delete the device object
+            std::cout << "Deleting device object..." << std::endl;
+            delete g_falcon;
+            g_falcon = nullptr;
+            std::cout << "Device object deleted" << std::endl;
+        }
+
+        // Reset all state variables
         g_nx.store(0.0f);
         g_ny.store(0.0f);
         g_nz.store(0.0f);
@@ -284,8 +353,11 @@ FALCON_API void ShutdownFalcon()
         g_calibrating.store(false);
         g_calibrated.store(false);
 
-        // Close device
-        g_falcon.close();
+        // Reset position cache
+        {
+            std::lock_guard<std::mutex> lock(g_posMutex);
+            g_currentPos = {0.0, 0.0, 0.0};
+        }
 
         std::cout << "Falcon shutdown complete" << std::endl;
     }
