@@ -42,6 +42,28 @@ static std::atomic<bool> g_calibrated(false);
 static std::mutex g_posMutex;
 static std::array<double, 3> g_currentPos = {0.0, 0.0, 0.0};
 
+// Position control mode
+static std::atomic<bool> g_positionControlEnabled(false);
+static std::atomic<float> g_targetX(0.0f);
+static std::atomic<float> g_targetY(0.0f);
+static std::atomic<float> g_targetZ(0.0f);
+
+// PID control parameters (from reference code)
+static const double PID_Kp = 100.0;         // Proportional gain
+static const double PID_Ki = 5.0;           // Integral gain
+static const double PID_Kd = 8.0;           // Derivative gain
+static const double PID_integralLimit = 0.005;  // Integral limit
+static const double PID_alpha = 0.1;        // Low-pass filter coefficient
+
+// PID control state variables
+static std::array<double, 3> g_lastPidPos = {0.0, 0.0, 0.0};
+static double g_xErrorIntegral = 0.0;
+static double g_yErrorIntegral = 0.0;
+static double g_zErrorIntegral = 0.0;
+static double g_filteredTargetX = 0.0;
+static double g_filteredTargetY = 0.0;
+static double g_filteredTargetZ = 0.0;
+
 /**
  * Haptic feedback loop running at 1kHz
  */
@@ -124,34 +146,87 @@ static void HapticLoop()
             }
             else if (g_calibrated.load())
             {
-                // Normal operation: Read contact parameters
-                float n[3] = {
-                    g_nx.load(),
-                    g_ny.load(),
-                    g_nz.load()
-                };
-                float d = g_depth.load();
+                std::array<double, 3> force;
 
-                // Calculate force: F = -k * depth * n
-                std::array<double, 3> force = {
-                    -K * d * n[0],
-                    -K * d * n[1],
-                    -K * d * n[2]
-                };
-
-                // Clamp force to maximum magnitude
-                double forceMagnitude = std::sqrt(
-                    force[0] * force[0] +
-                    force[1] * force[1] +
-                    force[2] * force[2]
-                );
-
-                if (forceMagnitude > FMAX && forceMagnitude > 0.0)
+                if (g_positionControlEnabled.load())
                 {
-                    double scale = FMAX / forceMagnitude;
-                    force[0] *= scale;
-                    force[1] *= scale;
-                    force[2] *= scale;
+                    // Position control mode: PID control to track target position
+
+                    // Get target position and apply low-pass filter
+                    double targetX = static_cast<double>(g_targetX.load());
+                    double targetY = static_cast<double>(g_targetY.load());
+                    double targetZ = static_cast<double>(g_targetZ.load());
+
+                    g_filteredTargetX = PID_alpha * targetX + (1.0 - PID_alpha) * g_filteredTargetX;
+                    g_filteredTargetY = PID_alpha * targetY + (1.0 - PID_alpha) * g_filteredTargetY;
+                    g_filteredTargetZ = PID_alpha * targetZ + (1.0 - PID_alpha) * g_filteredTargetZ;
+
+                    // X-axis PID control
+                    double xError = g_filteredTargetX - pos[0];
+                    double xVelocity = (pos[0] - g_lastPidPos[0]) * 1000.0;  // velocity in m/s
+                    g_xErrorIntegral += xError / 1000.0;
+                    if (g_xErrorIntegral > PID_integralLimit) g_xErrorIntegral = PID_integralLimit;
+                    if (g_xErrorIntegral < -PID_integralLimit) g_xErrorIntegral = -PID_integralLimit;
+                    double xForce = PID_Kp * xError + PID_Ki * g_xErrorIntegral - PID_Kd * xVelocity;
+
+                    // Y-axis PID control
+                    double yError = g_filteredTargetY - pos[1];
+                    double yVelocity = (pos[1] - g_lastPidPos[1]) * 1000.0;
+                    g_yErrorIntegral += yError / 1000.0;
+                    if (g_yErrorIntegral > PID_integralLimit) g_yErrorIntegral = PID_integralLimit;
+                    if (g_yErrorIntegral < -PID_integralLimit) g_yErrorIntegral = -PID_integralLimit;
+                    double yForce = PID_Kp * yError + PID_Ki * g_yErrorIntegral - PID_Kd * yVelocity;
+
+                    // Z-axis PID control
+                    double zError = g_filteredTargetZ - pos[2];
+                    double zVelocity = (pos[2] - g_lastPidPos[2]) * 1000.0;
+                    g_zErrorIntegral += zError / 1000.0;
+                    if (g_zErrorIntegral > PID_integralLimit) g_zErrorIntegral = PID_integralLimit;
+                    if (g_zErrorIntegral < -PID_integralLimit) g_zErrorIntegral = -PID_integralLimit;
+                    double zForce = PID_Kp * zError + PID_Ki * g_zErrorIntegral - PID_Kd * zVelocity;
+
+                    // Clamp forces to safe maximum (2N per axis)
+                    const double maxForce = 2.0;
+                    xForce = std::max(-maxForce, std::min(maxForce, xForce));
+                    yForce = std::max(-maxForce, std::min(maxForce, yForce));
+                    zForce = std::max(-maxForce, std::min(maxForce, zForce));
+
+                    force = {xForce, yForce, zForce};
+
+                    // Update last position for derivative calculation
+                    g_lastPidPos = pos;
+                }
+                else
+                {
+                    // Contact-based haptic feedback mode
+                    float n[3] = {
+                        g_nx.load(),
+                        g_ny.load(),
+                        g_nz.load()
+                    };
+                    float d = g_depth.load();
+
+                    // Calculate force: F = -k * depth * n
+                    force = {
+                        -K * d * n[0],
+                        -K * d * n[1],
+                        -K * d * n[2]
+                    };
+
+                    // Clamp force to maximum magnitude
+                    double forceMagnitude = std::sqrt(
+                        force[0] * force[0] +
+                        force[1] * force[1] +
+                        force[2] * force[2]
+                    );
+
+                    if (forceMagnitude > FMAX && forceMagnitude > 0.0)
+                    {
+                        double scale = FMAX / forceMagnitude;
+                        force[0] *= scale;
+                        force[1] *= scale;
+                        force[2] *= scale;
+                    }
                 }
 
                 // Set force (will be sent on next IO loop)
@@ -416,4 +491,41 @@ FALCON_API void StartCalibration()
     std::cout << "Starting calibration - move Falcon outward then straight inward" << std::endl;
     g_calibrating.store(true);
     g_calibrated.store(false);
+}
+
+FALCON_API void SetTargetPosition(float x, float y, float z)
+{
+    g_targetX.store(x);
+    g_targetY.store(y);
+    g_targetZ.store(z);
+}
+
+FALCON_API void EnablePositionControl(bool enable)
+{
+    if (enable && !g_positionControlEnabled.load())
+    {
+        // Reset PID state when enabling position control
+        g_xErrorIntegral = 0.0;
+        g_yErrorIntegral = 0.0;
+        g_zErrorIntegral = 0.0;
+
+        // Initialize filtered targets to current target
+        g_filteredTargetX = static_cast<double>(g_targetX.load());
+        g_filteredTargetY = static_cast<double>(g_targetY.load());
+        g_filteredTargetZ = static_cast<double>(g_targetZ.load());
+
+        // Initialize last position
+        {
+            std::lock_guard<std::mutex> lock(g_posMutex);
+            g_lastPidPos = g_currentPos;
+        }
+
+        std::cout << "Position control enabled" << std::endl;
+    }
+    else if (!enable && g_positionControlEnabled.load())
+    {
+        std::cout << "Position control disabled" << std::endl;
+    }
+
+    g_positionControlEnabled.store(enable);
 }

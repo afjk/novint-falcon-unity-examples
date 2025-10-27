@@ -49,4 +49,21 @@ FALCON_API bool IsCalibrated();
  */
 FALCON_API void StartCalibration();
 
+/**
+ * Set target position for position control mode.
+ * The Falcon grip will be pulled towards this position using PID control.
+ * @param x Target X position (meters)
+ * @param y Target Y position (meters)
+ * @param z Target Z position (meters)
+ */
+FALCON_API void SetTargetPosition(float x, float y, float z);
+
+/**
+ * Enable or disable position control mode.
+ * When enabled, the grip tracks the target position set by SetTargetPosition.
+ * When disabled, normal contact-based haptic feedback is used.
+ * @param enable true to enable position control, false for contact mode
+ */
+FALCON_API void EnablePositionControl(bool enable);
+
 #endif // FALCONBRIDGE_H

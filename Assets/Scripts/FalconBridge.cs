@@ -68,6 +68,25 @@ public static class FalconBridge
     public static extern void StartCalibration();
 
     /// <summary>
+    /// Set target position for position control mode.
+    /// The Falcon grip will be pulled towards this position using PID control.
+    /// </summary>
+    /// <param name="x">Target X position in meters</param>
+    /// <param name="y">Target Y position in meters</param>
+    /// <param name="z">Target Z position in meters</param>
+    [DllImport(LIBRARY_NAME, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void SetTargetPosition(float x, float y, float z);
+
+    /// <summary>
+    /// Enable or disable position control mode.
+    /// When enabled, the grip tracks the target position set by SetTargetPosition.
+    /// When disabled, normal contact-based haptic feedback is used.
+    /// </summary>
+    /// <param name="enable">True to enable position control, false for contact mode</param>
+    [DllImport(LIBRARY_NAME, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void EnablePositionControl(bool enable);
+
+    /// <summary>
     /// Convenience method to get tool position as a Vector3.
     /// </summary>
     /// <param name="position">Output position vector</param>
@@ -96,5 +115,14 @@ public static class FalconBridge
     public static void ClearContact()
     {
         SetContact(0f, 0f, 0f, 0f);
+    }
+
+    /// <summary>
+    /// Convenience method to set target position using Vector3.
+    /// </summary>
+    /// <param name="targetPosition">Target position vector in meters</param>
+    public static void SetTargetPosition(Vector3 targetPosition)
+    {
+        SetTargetPosition(targetPosition.x, targetPosition.y, targetPosition.z);
     }
 }
