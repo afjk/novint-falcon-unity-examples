@@ -55,21 +55,6 @@ public class FalconController : MonoBehaviour
         {
             Debug.LogError($"Error initializing Falcon device: {e.Message}");
         }
-
-        // Create tool cursor if not assigned
-        if (toolCursor == null)
-        {
-            toolCursor = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-            toolCursor.transform.localScale = Vector3.one * 0.05f;
-            toolCursor.name = "FalconToolCursor";
-
-            // Make it visually distinct
-            var renderer = toolCursor.GetComponent<Renderer>();
-            if (renderer != null)
-            {
-                renderer.material.color = Color.red;
-            }
-        }
     }
 
     void Update()
@@ -86,7 +71,7 @@ public class FalconController : MonoBehaviour
             // Update cursor position
             if (toolCursor != null)
             {
-                toolCursor.transform.position = currentPosition * positionScale;
+                toolCursor.transform.position = new Vector3(currentPosition.x, currentPosition.y, -currentPosition.z) * positionScale;
 
                 // Change cursor color based on calibration status
                 var renderer = toolCursor.GetComponent<Renderer>();
