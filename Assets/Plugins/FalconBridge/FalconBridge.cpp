@@ -1,6 +1,7 @@
 #include "FalconBridge.h"
 #include <falcon/core/FalconDevice.h>
 #include <falcon/firmware/FalconFirmwareNovintSDK.h>
+#include <falcon/grip/FalconGripFourButton.h>
 #include <falcon/kinematic/FalconKinematicStamper.h>
 #include <falcon/util/FalconFirmwareBinaryNvent.h>
 #include <thread>
@@ -43,6 +44,16 @@ static std::atomic<bool> g_calibrated(false);
 // Current position cache
 static std::mutex g_posMutex;
 static std::array<double, 3> g_currentPos = {0.0, 0.0, 0.0};
+
+// Button state cache
+static std::mutex g_buttonMutex;
+static std::atomic<bool> g_button1(false);
+static std::atomic<bool> g_button2(false);
+static std::atomic<bool> g_button3(false);
+static std::atomic<bool> g_button4(false);
+
+// LED control
+static std::atomic<int> g_ledMask(0);
 
 // Position control mode
 static std::atomic<bool> g_positionControlEnabled(false);
@@ -164,7 +175,30 @@ static void HapticLoop()
                     firmware->setLEDStatus(0x2);  // GREEN_LED = 0x2
                 }
             }
-            else if (g_calibrated.load())
+            else if (firmware != nullptr)
+            {
+                // Normal operation - set user-controlled LED status
+                firmware->setLEDStatus(g_ledMask.load());
+
+                // Read button states from firmware grip info
+                // Cast to FalconFirmwareNovintSDK to access getGripInfo()
+                auto firmwareShared = g_falcon->getFalconFirmware();
+                auto novintFirmware = std::dynamic_pointer_cast<FalconFirmwareNovintSDK>(firmwareShared);
+                if (novintFirmware != nullptr)
+                {
+                    const uint8_t* gripInfo = novintFirmware->getGripInfo();
+                    if (gripInfo != nullptr)
+                    {
+                        uint8_t buttons = *gripInfo;
+                        g_button1.store((buttons & 0x01) != 0);  // PLUS_BUTTON
+                        g_button2.store((buttons & 0x02) != 0);  // FORWARD_BUTTON
+                        g_button3.store((buttons & 0x04) != 0);  // CENTER_BUTTON
+                        g_button4.store((buttons & 0x08) != 0);  // MINUS_BUTTON
+                    }
+                }
+            }
+
+            if (g_calibrated.load())
             {
                 std::array<double, 3> force;
 
@@ -371,6 +405,10 @@ FALCON_API bool InitFalcon()
         std::cout << "Setting kinematic model..." << std::endl;
         g_falcon->setFalconKinematic<FalconKinematicStamper>();
 
+        // Set grip model for button input
+        std::cout << "Setting grip model..." << std::endl;
+        g_falcon->setFalconGrip<FalconGripFourButton>();
+
         // Start haptic thread
         std::cout << "Starting haptic thread..." << std::endl;
         g_running.store(true);
@@ -567,4 +605,38 @@ FALCON_API void SetPIDParameters(float kp, float ki, float kd, float filterAlpha
 
     std::cout << "PID parameters updated: Kp=" << kp << ", Ki=" << ki << ", Kd=" << kd
               << ", alpha=" << filterAlpha << ", maxForce=" << maxForce << std::endl;
+}
+
+FALCON_API void SetLEDStatus(int ledMask)
+{
+    // Store LED mask - will be applied in haptic loop
+    // Note: During calibration, LED status is overridden
+    g_ledMask.store(ledMask);
+}
+
+FALCON_API bool GetButtonStates(bool* button1, bool* button2, bool* button3, bool* button4)
+{
+    if (!g_running.load())
+    {
+        return false;
+    }
+
+    try
+    {
+        *button1 = g_button1.load();
+        *button2 = g_button2.load();
+        *button3 = g_button3.load();
+        *button4 = g_button4.load();
+        return true;
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "Exception in GetButtonStates: " << e.what() << std::endl;
+        return false;
+    }
+    catch (...)
+    {
+        std::cerr << "Unknown exception in GetButtonStates" << std::endl;
+        return false;
+    }
 }

@@ -99,6 +99,38 @@ public static class FalconBridge
     public static extern void SetPIDParameters(float kp, float ki, float kd, float filterAlpha, float maxForce);
 
     /// <summary>
+    /// Set LED status on the Falcon device.
+    /// Multiple LEDs can be enabled by OR-ing the values together.
+    /// Note: During calibration, LED status is overridden (red during calibration, green when complete).
+    /// </summary>
+    /// <param name="ledMask">LED mask (0x1=BLUE, 0x2=GREEN, 0x4=AMBER, 0x8=RED)</param>
+    [DllImport(LIBRARY_NAME, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void SetLEDStatus(int ledMask);
+
+    /// <summary>
+    /// Get the current state of the Falcon's buttons.
+    /// </summary>
+    /// <param name="button1">Button 1 state (PLUS/Right button)</param>
+    /// <param name="button2">Button 2 state (FORWARD button)</param>
+    /// <param name="button3">Button 3 state (CENTER button)</param>
+    /// <param name="button4">Button 4 state (MINUS/Left button)</param>
+    /// <returns>True if button states retrieved successfully, false otherwise</returns>
+    [DllImport(LIBRARY_NAME, CallingConvention = CallingConvention.Cdecl)]
+    public static extern bool GetButtonStates(out bool button1, out bool button2, out bool button3, out bool button4);
+
+    /// <summary>
+    /// LED color constants for use with SetLEDStatus.
+    /// </summary>
+    public static class LED
+    {
+        public const int BLUE = 0x1;
+        public const int GREEN = 0x2;
+        public const int AMBER = 0x4;
+        public const int RED = 0x8;
+        public const int OFF = 0x0;
+    }
+
+    /// <summary>
     /// Convenience method to get tool position as a Vector3.
     /// </summary>
     /// <param name="position">Output position vector</param>

@@ -119,6 +119,57 @@ NavMeshSettings:
     debug:
       m_Flags: 0
   m_NavMeshData: {fileID: 0}
+--- !u!1 &130765553
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 130765555}
+  - component: {fileID: 130765554}
+  m_Layer: 0
+  m_Name: Falcon LED Button Example
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &130765554
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 130765553}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 83f760b4c0ca341c1918d7bc3964c0db, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  currentLED: 2
+  button1Pressed: 1
+  button2Pressed: 1
+  button3Pressed: 1
+  button4Pressed: 1
+  cycleLEDs: 1
+  cycleDuration: 1
+--- !u!4 &130765555
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 130765553}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0.119, y: 0.028, z: -0.171}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &152283864
 GameObject:
   m_ObjectHideFlags: 0
@@ -654,7 +705,7 @@ GameObject:
   - component: {fileID: 1704473060}
   - component: {fileID: 1704473059}
   m_Layer: 0
-  m_Name: GripSphere (1)
+  m_Name: GripSphere Unity Grip
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -763,7 +814,7 @@ GameObject:
   - component: {fileID: 1924366018}
   - component: {fileID: 1924366017}
   m_Layer: 0
-  m_Name: GripSphere
+  m_Name: GripSphere NF Grip
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -882,3 +933,4 @@ SceneRoots:
   - {fileID: 1704473062}
   - {fileID: 1065323233}
   - {fileID: 746774760}
+  - {fileID: 130765555}

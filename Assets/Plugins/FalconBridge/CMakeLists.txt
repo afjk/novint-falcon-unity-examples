@@ -29,8 +29,8 @@ set(HEADERS
     FalconBridge.h
 )
 
-# Create shared library (.bundle for Unity on macOS)
-add_library(FalconBridge MODULE ${SOURCES} ${HEADERS})
+# Create shared library as .dylib for Unity on macOS
+add_library(FalconBridge SHARED ${SOURCES} ${HEADERS})
 
 # Include directories
 target_include_directories(FalconBridge PRIVATE ${NIFALCON_INCLUDE})
@@ -41,11 +41,8 @@ target_link_libraries(FalconBridge ${NIFALCON_LIB})
 # Set output properties for macOS
 if(APPLE)
     set_target_properties(FalconBridge PROPERTIES
-        BUNDLE TRUE
-        BUNDLE_EXTENSION "bundle"
-        MACOSX_BUNDLE_INFO_PLIST ""
-        PREFIX ""
-        SUFFIX ".bundle"
+        PREFIX "lib"
+        SUFFIX ".dylib"
         LIBRARY_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/../macOS"
     )
 
@@ -54,6 +51,12 @@ if(APPLE)
 
     # Enable C++11 threads
     target_compile_options(FalconBridge PRIVATE -pthread)
+
+    # Set install name for the dylib
+    set_target_properties(FalconBridge PROPERTIES
+        INSTALL_NAME_DIR "@rpath"
+        BUILD_WITH_INSTALL_RPATH TRUE
+    )
 endif()
 
 # For debugging

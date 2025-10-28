@@ -77,4 +77,21 @@ FALCON_API void EnablePositionControl(bool enable);
  */
 FALCON_API void SetPIDParameters(float kp, float ki, float kd, float filterAlpha, float maxForce);
 
+/**
+ * Set LED status on the Falcon device.
+ * Multiple LEDs can be enabled by OR-ing the values together.
+ * @param ledMask LED mask (0x1=BLUE, 0x2=GREEN, 0x4=AMBER, 0x8=RED)
+ */
+FALCON_API void SetLEDStatus(int ledMask);
+
+/**
+ * Get the current state of the Falcon's buttons.
+ * @param button1 Pointer to store button 1 state (true if pressed)
+ * @param button2 Pointer to store button 2 state (true if pressed)
+ * @param button3 Pointer to store button 3 state (true if pressed)
+ * @param button4 Pointer to store button 4 state (true if pressed)
+ * @return true if button states retrieved successfully, false otherwise
+ */
+FALCON_API bool GetButtonStates(bool* button1, bool* button2, bool* button3, bool* button4);
+
 #endif // FALCONBRIDGE_H
