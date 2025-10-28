@@ -29,7 +29,8 @@ Assets/
 └── Scripts/
     ├── FalconBridge.cs           # C# wrapper
     ├── FalconController.cs       # Basic example
-    └── FalconCollisionHandler.cs # Advanced collision example
+    ├── FalconCollisionHandler.cs # Advanced collision example
+    └── FalconRecordPlayback.cs   # Record/replay sample with LED cues
 ```
 
 ## Quick Start
@@ -167,6 +168,26 @@ Advanced controller with:
 - Stiffness adjustment
 - Visual feedback
 - Contact detection
+
+### FalconRecordPlayback.cs
+Recording and playback workflow that:
+- Captures Falcon grip motion while button **3** is held
+- Stops recording when button 3 is released
+- Plays back the captured path (looping) when button **1** is pressed
+- Stops playback when button 1 is pressed again
+- Drives the Falcon LEDs (recording = red, playback = blue, idle = green)
+- Keeps forces disabled whenever playback is not active so the arm stays limp during recording/idle
+
+Attach it alongside `FalconController` (with a small sphere assigned to `playbackCursor`) to reproduce recorded trajectories.
+
+## Sample Scenes
+
+- **SampleScene.unity** – original plane/collision demo
+- **FalconRecordPlaybackScene.unity** – ready-to-run scene wired for the record/replay flow:
+  1. Select `Assets/Scenes/FalconRecordPlaybackScene.unity`.
+  2. Ensure the Falcon is calibrated (LED green) and press Play.
+  3. Hold button 3 to record a path, release to stop.
+  4. Press button 1 to start looping playback (LED turns blue), press again to stop (LED returns green).
 
 ## Force Model
 
