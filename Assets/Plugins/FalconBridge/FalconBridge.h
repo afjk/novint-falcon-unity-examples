@@ -66,4 +66,15 @@ FALCON_API void SetTargetPosition(float x, float y, float z);
  */
 FALCON_API void EnablePositionControl(bool enable);
 
+/**
+ * Set PID control parameters for position control.
+ * Adjust these to tune the tracking behavior and reduce vibration.
+ * @param kp Proportional gain (lower = softer, higher = stiffer)
+ * @param ki Integral gain (lower = less windup)
+ * @param kd Derivative gain (higher = more damping, reduces oscillation)
+ * @param filterAlpha Low-pass filter coefficient (0.01-1.0, lower = smoother)
+ * @param maxForce Maximum force per axis in Newtons (0.5-3.0)
+ */
+FALCON_API void SetPIDParameters(float kp, float ki, float kd, float filterAlpha, float maxForce);
+
 #endif // FALCONBRIDGE_H

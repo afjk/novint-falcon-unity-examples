@@ -48,12 +48,13 @@ static std::atomic<float> g_targetX(0.0f);
 static std::atomic<float> g_targetY(0.0f);
 static std::atomic<float> g_targetZ(0.0f);
 
-// PID control parameters (from reference code)
-static const double PID_Kp = 100.0;         // Proportional gain
-static const double PID_Ki = 5.0;           // Integral gain
-static const double PID_Kd = 8.0;           // Derivative gain
-static const double PID_integralLimit = 0.005;  // Integral limit
-static const double PID_alpha = 0.1;        // Low-pass filter coefficient
+// PID control parameters (adjustable at runtime)
+static std::atomic<double> PID_Kp(100.0);         // Proportional gain
+static std::atomic<double> PID_Ki(5.0);           // Integral gain
+static std::atomic<double> PID_Kd(8.0);           // Derivative gain
+static const double PID_integralLimit = 0.005;    // Integral limit (fixed)
+static std::atomic<double> PID_alpha(0.1);        // Low-pass filter coefficient
+static std::atomic<double> PID_maxForce(2.0);     // Maximum force per axis
 
 // PID control state variables
 static std::array<double, 3> g_lastPidPos = {0.0, 0.0, 0.0};
@@ -157,9 +158,15 @@ static void HapticLoop()
                     double targetY = static_cast<double>(g_targetY.load());
                     double targetZ = static_cast<double>(g_targetZ.load());
 
-                    g_filteredTargetX = PID_alpha * targetX + (1.0 - PID_alpha) * g_filteredTargetX;
-                    g_filteredTargetY = PID_alpha * targetY + (1.0 - PID_alpha) * g_filteredTargetY;
-                    g_filteredTargetZ = PID_alpha * targetZ + (1.0 - PID_alpha) * g_filteredTargetZ;
+                    double alpha = PID_alpha.load();
+                    g_filteredTargetX = alpha * targetX + (1.0 - alpha) * g_filteredTargetX;
+                    g_filteredTargetY = alpha * targetY + (1.0 - alpha) * g_filteredTargetY;
+                    g_filteredTargetZ = alpha * targetZ + (1.0 - alpha) * g_filteredTargetZ;
+
+                    // Load PID parameters
+                    double kp = PID_Kp.load();
+                    double ki = PID_Ki.load();
+                    double kd = PID_Kd.load();
 
                     // X-axis PID control
                     double xError = g_filteredTargetX - pos[0];
@@ -167,7 +174,7 @@ static void HapticLoop()
                     g_xErrorIntegral += xError / 1000.0;
                     if (g_xErrorIntegral > PID_integralLimit) g_xErrorIntegral = PID_integralLimit;
                     if (g_xErrorIntegral < -PID_integralLimit) g_xErrorIntegral = -PID_integralLimit;
-                    double xForce = PID_Kp * xError + PID_Ki * g_xErrorIntegral - PID_Kd * xVelocity;
+                    double xForce = kp * xError + ki * g_xErrorIntegral - kd * xVelocity;
 
                     // Y-axis PID control
                     double yError = g_filteredTargetY - pos[1];
@@ -175,7 +182,7 @@ static void HapticLoop()
                     g_yErrorIntegral += yError / 1000.0;
                     if (g_yErrorIntegral > PID_integralLimit) g_yErrorIntegral = PID_integralLimit;
                     if (g_yErrorIntegral < -PID_integralLimit) g_yErrorIntegral = -PID_integralLimit;
-                    double yForce = PID_Kp * yError + PID_Ki * g_yErrorIntegral - PID_Kd * yVelocity;
+                    double yForce = kp * yError + ki * g_yErrorIntegral - kd * yVelocity;
 
                     // Z-axis PID control
                     double zError = g_filteredTargetZ - pos[2];
@@ -183,10 +190,10 @@ static void HapticLoop()
                     g_zErrorIntegral += zError / 1000.0;
                     if (g_zErrorIntegral > PID_integralLimit) g_zErrorIntegral = PID_integralLimit;
                     if (g_zErrorIntegral < -PID_integralLimit) g_zErrorIntegral = -PID_integralLimit;
-                    double zForce = PID_Kp * zError + PID_Ki * g_zErrorIntegral - PID_Kd * zVelocity;
+                    double zForce = kp * zError + ki * g_zErrorIntegral - kd * zVelocity;
 
-                    // Clamp forces to safe maximum (2N per axis)
-                    const double maxForce = 2.0;
+                    // Clamp forces to safe maximum
+                    double maxForce = PID_maxForce.load();
                     xForce = std::max(-maxForce, std::min(maxForce, xForce));
                     yForce = std::max(-maxForce, std::min(maxForce, yForce));
                     zForce = std::max(-maxForce, std::min(maxForce, zForce));
@@ -528,4 +535,16 @@ FALCON_API void EnablePositionControl(bool enable)
     }
 
     g_positionControlEnabled.store(enable);
+}
+
+FALCON_API void SetPIDParameters(float kp, float ki, float kd, float filterAlpha, float maxForce)
+{
+    PID_Kp.store(static_cast<double>(kp));
+    PID_Ki.store(static_cast<double>(ki));
+    PID_Kd.store(static_cast<double>(kd));
+    PID_alpha.store(static_cast<double>(filterAlpha));
+    PID_maxForce.store(static_cast<double>(maxForce));
+
+    std::cout << "PID parameters updated: Kp=" << kp << ", Ki=" << ki << ", Kd=" << kd
+              << ", alpha=" << filterAlpha << ", maxForce=" << maxForce << std::endl;
 }

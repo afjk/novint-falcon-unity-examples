@@ -87,6 +87,18 @@ public static class FalconBridge
     public static extern void EnablePositionControl(bool enable);
 
     /// <summary>
+    /// Set PID control parameters for position control.
+    /// Adjust these to tune the tracking behavior and reduce vibration.
+    /// </summary>
+    /// <param name="kp">Proportional gain (lower = softer, higher = stiffer)</param>
+    /// <param name="ki">Integral gain (lower = less windup)</param>
+    /// <param name="kd">Derivative gain (higher = more damping, reduces oscillation)</param>
+    /// <param name="filterAlpha">Low-pass filter coefficient (0.01-1.0, lower = smoother)</param>
+    /// <param name="maxForce">Maximum force per axis in Newtons (0.5-3.0)</param>
+    [DllImport(LIBRARY_NAME, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void SetPIDParameters(float kp, float ki, float kd, float filterAlpha, float maxForce);
+
+    /// <summary>
     /// Convenience method to get tool position as a Vector3.
     /// </summary>
     /// <param name="position">Output position vector</param>
