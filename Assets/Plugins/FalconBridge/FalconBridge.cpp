@@ -10,6 +10,7 @@
 #include <cmath>
 #include <array>
 #include <mutex>
+#include <algorithm>
 
 using namespace libnifalcon;
 
@@ -71,6 +72,8 @@ static double g_filteredTargetZ = 0.0;
  */
 static void HapticLoop()
 {
+    static auto lastLoopTime = std::chrono::steady_clock::now();
+
     while (g_running)
     {
         try
@@ -108,6 +111,19 @@ static void HapticLoop()
             if (prevFailures > 0)
             {
                 std::cout << "IO loop recovered after " << prevFailures << " failures" << std::endl;
+            }
+
+            // Measure loop delta time to keep PID timing consistent even if cadence drifts
+            auto now = std::chrono::steady_clock::now();
+            double deltaSeconds = std::chrono::duration<double>(now - lastLoopTime).count();
+            lastLoopTime = now;
+            if (deltaSeconds <= 0.0)
+            {
+                deltaSeconds = 0.001;  // fallback to nominal 1kHz
+            }
+            else if (deltaSeconds > 0.01)
+            {
+                deltaSeconds = 0.01;   // clamp to avoid runaway derivatives after long stalls
             }
 
             // Step 2: Get current position (after successful IO loop)
@@ -162,9 +178,12 @@ static void HapticLoop()
                     double targetZ = static_cast<double>(g_targetZ.load());
 
                     double alpha = PID_alpha.load();
-                    g_filteredTargetX = alpha * targetX + (1.0 - alpha) * g_filteredTargetX;
-                    g_filteredTargetY = alpha * targetY + (1.0 - alpha) * g_filteredTargetY;
-                    g_filteredTargetZ = alpha * targetZ + (1.0 - alpha) * g_filteredTargetZ;
+                    double filterFactor = alpha * (deltaSeconds * 1000.0);
+                    if (filterFactor < 0.0) filterFactor = 0.0;
+                    if (filterFactor > 1.0) filterFactor = 1.0;
+                    g_filteredTargetX += filterFactor * (targetX - g_filteredTargetX);
+                    g_filteredTargetY += filterFactor * (targetY - g_filteredTargetY);
+                    g_filteredTargetZ += filterFactor * (targetZ - g_filteredTargetZ);
 
                     // Load PID parameters
                     double kp = PID_Kp.load();
@@ -173,24 +192,24 @@ static void HapticLoop()
 
                     // X-axis PID control
                     double xError = g_filteredTargetX - pos[0];
-                    double xVelocity = (pos[0] - g_lastPidPos[0]) * 1000.0;  // velocity in m/s
-                    g_xErrorIntegral += xError / 1000.0;
+                    double xVelocity = (pos[0] - g_lastPidPos[0]) / deltaSeconds;  // velocity in m/s
+                    g_xErrorIntegral += xError * deltaSeconds;
                     if (g_xErrorIntegral > PID_integralLimit) g_xErrorIntegral = PID_integralLimit;
                     if (g_xErrorIntegral < -PID_integralLimit) g_xErrorIntegral = -PID_integralLimit;
                     double xForce = kp * xError + ki * g_xErrorIntegral - kd * xVelocity;
 
                     // Y-axis PID control
                     double yError = g_filteredTargetY - pos[1];
-                    double yVelocity = (pos[1] - g_lastPidPos[1]) * 1000.0;
-                    g_yErrorIntegral += yError / 1000.0;
+                    double yVelocity = (pos[1] - g_lastPidPos[1]) / deltaSeconds;
+                    g_yErrorIntegral += yError * deltaSeconds;
                     if (g_yErrorIntegral > PID_integralLimit) g_yErrorIntegral = PID_integralLimit;
                     if (g_yErrorIntegral < -PID_integralLimit) g_yErrorIntegral = -PID_integralLimit;
                     double yForce = kp * yError + ki * g_yErrorIntegral - kd * yVelocity;
 
                     // Z-axis PID control
                     double zError = g_filteredTargetZ - pos[2];
-                    double zVelocity = (pos[2] - g_lastPidPos[2]) * 1000.0;
-                    g_zErrorIntegral += zError / 1000.0;
+                    double zVelocity = (pos[2] - g_lastPidPos[2]) / deltaSeconds;
+                    g_zErrorIntegral += zError * deltaSeconds;
                     if (g_zErrorIntegral > PID_integralLimit) g_zErrorIntegral = PID_integralLimit;
                     if (g_zErrorIntegral < -PID_integralLimit) g_zErrorIntegral = -PID_integralLimit;
                     double zForce = kp * zError + ki * g_zErrorIntegral - kd * zVelocity;
