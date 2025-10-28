@@ -28,7 +28,7 @@ public class FalconPositionTracker : MonoBehaviour
     [Header("Unity-side Smoothing")]
     [Tooltip("Smooth target position changes on Unity side (0.0 = no smoothing, 0.5 = heavy smoothing)")]
     [Range(0f, 0.9f)]
-    public float unitySmoothingFactor = 0f;  // Start with no Unity smoothing - test pure P control first
+    public float unitySmoothingFactor = 0.5f;  // Heavy smoothing to prevent jerky GameObject movement
 
     [Header("PID Control Parameters")]
     [Tooltip("Proportional gain (lower = softer, higher = stiffer)")]

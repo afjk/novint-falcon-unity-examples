@@ -33,6 +33,7 @@ static const float FMAX = 3.0f;  // Maximum force (Newtons)
 static const int kIOLoopFailureLimit = 200;
 static std::atomic<int> g_consecutiveFailures(0);
 static std::atomic<int> g_successfulLoops(0);
+static constexpr bool kEnableHapticLoopLogging = false;  // Disable per-iteration logging by default
 
 // Calibration state
 static std::atomic<bool> g_calibrating(false);
@@ -114,13 +115,15 @@ static void HapticLoop()
 
             // Debug: Log position every 100 successful loops (more frequent)
             int loopCount = g_successfulLoops.fetch_add(1) + 1;
-            if (loopCount % 100 == 0)
+            if (kEnableHapticLoopLogging && loopCount % 100 == 0)
             {
                 std::cout << "C++ Position [" << loopCount << "]: ("
                           << pos[0] << ", " << pos[1] << ", " << pos[2] << ")"
                           << " magnitude: " << std::sqrt(pos[0]*pos[0] + pos[1]*pos[1] + pos[2]*pos[2])
                           << std::endl;
             }
+
+            // runIOLoop() already sets the device cadence (~1 kHz), so avoid extra sleeps here
 
             // Cache position for GetToolPose
             {
@@ -246,8 +249,6 @@ static void HapticLoop()
                 g_falcon->setForce(force);
             }
 
-            // Run at 1kHz
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
         catch (const std::exception& e)
         {
