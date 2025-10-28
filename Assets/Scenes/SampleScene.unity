@@ -512,10 +512,10 @@ MonoBehaviour:
   fixedPosition: {x: 0, y: 0.04, z: 0}
   positionScale: 1
   invertZ: 1
-  unitySmoothingFactor: 0.9
-  pidKp: 100
+  unitySmoothingFactor: 0.3
+  pidKp: 90
   pidKi: 5
-  pidKd: 8
+  pidKd: 2
   filterAlpha: 0.1
   maxForce: 2
   showDebug: 0

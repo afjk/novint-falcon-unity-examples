@@ -60,6 +60,12 @@ static std::atomic<bool> g_positionControlEnabled(false);
 static std::atomic<float> g_targetX(0.0f);
 static std::atomic<float> g_targetY(0.0f);
 static std::atomic<float> g_targetZ(0.0f);
+static std::atomic<double> g_targetStartX(0.0);
+static std::atomic<double> g_targetStartY(0.0);
+static std::atomic<double> g_targetStartZ(0.0);
+static std::atomic<double> g_targetBlendDuration(0.02);
+static std::atomic<long long> g_targetBlendStartNs(0);
+static std::atomic<bool> g_targetInitialized(false);
 
 // PID control parameters (adjustable at runtime)
 static std::atomic<double> PID_Kp(100.0);         // Proportional gain
@@ -84,6 +90,7 @@ static double g_filteredTargetZ = 0.0;
 static void HapticLoop()
 {
     static auto lastLoopTime = std::chrono::steady_clock::now();
+    constexpr double kNominalDt = 1.0 / 1000.0;  // 1 kHz nominal timestep
 
     while (g_running)
     {
@@ -130,12 +137,13 @@ static void HapticLoop()
             lastLoopTime = now;
             if (deltaSeconds <= 0.0)
             {
-                deltaSeconds = 0.001;  // fallback to nominal 1kHz
+                deltaSeconds = kNominalDt;
             }
-            else if (deltaSeconds > 0.01)
-            {
-                deltaSeconds = 0.01;   // clamp to avoid runaway derivatives after long stalls
-            }
+            long long nowNs = std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count();
+
+            // Use nominal timestep for control math (reduces noise from scheduling jitter)
+            constexpr double dt = kNominalDt;
+            constexpr double invDt = 1000.0;  // 1 / 0.001
 
             // Step 2: Get current position (after successful IO loop)
             std::array<double, 3> pos = g_falcon->getPosition();
@@ -206,18 +214,44 @@ static void HapticLoop()
                 {
                     // Position control mode: PID control to track target position
 
-                    // Get target position and apply low-pass filter
-                    double targetX = static_cast<double>(g_targetX.load());
-                    double targetY = static_cast<double>(g_targetY.load());
-                    double targetZ = static_cast<double>(g_targetZ.load());
+                    // Interpolate target between Unity updates for smoother motion
+                    long long blendStartNs = g_targetBlendStartNs.load();
+                    double blendDuration = g_targetBlendDuration.load();
+                    double elapsedSinceUpdate = 0.0;
+                    if (blendStartNs > 0)
+                    {
+                        elapsedSinceUpdate = (nowNs - blendStartNs) * 1e-9;
+                        if (elapsedSinceUpdate < 0.0)
+                        {
+                            elapsedSinceUpdate = 0.0;
+                        }
+                    }
+
+                    double startX = g_targetStartX.load();
+                    double startY = g_targetStartY.load();
+                    double startZ = g_targetStartZ.load();
+                    double goalX = static_cast<double>(g_targetX.load());
+                    double goalY = static_cast<double>(g_targetY.load());
+                    double goalZ = static_cast<double>(g_targetZ.load());
+
+                    double progress = 1.0;
+                    if (blendDuration > 0.0005)
+                    {
+                        progress = elapsedSinceUpdate / blendDuration;
+                        if (progress < 0.0) progress = 0.0;
+                        if (progress > 1.0) progress = 1.0;
+                    }
+
+                    double targetX = startX + (goalX - startX) * progress;
+                    double targetY = startY + (goalY - startY) * progress;
+                    double targetZ = startZ + (goalZ - startZ) * progress;
 
                     double alpha = PID_alpha.load();
-                    double filterFactor = alpha * (deltaSeconds * 1000.0);
-                    if (filterFactor < 0.0) filterFactor = 0.0;
-                    if (filterFactor > 1.0) filterFactor = 1.0;
-                    g_filteredTargetX += filterFactor * (targetX - g_filteredTargetX);
-                    g_filteredTargetY += filterFactor * (targetY - g_filteredTargetY);
-                    g_filteredTargetZ += filterFactor * (targetZ - g_filteredTargetZ);
+                    if (alpha < 0.0) alpha = 0.0;
+                    if (alpha > 1.0) alpha = 1.0;
+                    g_filteredTargetX = (1.0 - alpha) * g_filteredTargetX + alpha * targetX;
+                    g_filteredTargetY = (1.0 - alpha) * g_filteredTargetY + alpha * targetY;
+                    g_filteredTargetZ = (1.0 - alpha) * g_filteredTargetZ + alpha * targetZ;
 
                     // Load PID parameters
                     double kp = PID_Kp.load();
@@ -226,24 +260,24 @@ static void HapticLoop()
 
                     // X-axis PID control
                     double xError = g_filteredTargetX - pos[0];
-                    double xVelocity = (pos[0] - g_lastPidPos[0]) / deltaSeconds;  // velocity in m/s
-                    g_xErrorIntegral += xError * deltaSeconds;
+                    double xVelocity = (pos[0] - g_lastPidPos[0]) * invDt;  // velocity in m/s
+                    g_xErrorIntegral += xError * dt;
                     if (g_xErrorIntegral > PID_integralLimit) g_xErrorIntegral = PID_integralLimit;
                     if (g_xErrorIntegral < -PID_integralLimit) g_xErrorIntegral = -PID_integralLimit;
                     double xForce = kp * xError + ki * g_xErrorIntegral - kd * xVelocity;
 
                     // Y-axis PID control
                     double yError = g_filteredTargetY - pos[1];
-                    double yVelocity = (pos[1] - g_lastPidPos[1]) / deltaSeconds;
-                    g_yErrorIntegral += yError * deltaSeconds;
+                    double yVelocity = (pos[1] - g_lastPidPos[1]) * invDt;
+                    g_yErrorIntegral += yError * dt;
                     if (g_yErrorIntegral > PID_integralLimit) g_yErrorIntegral = PID_integralLimit;
                     if (g_yErrorIntegral < -PID_integralLimit) g_yErrorIntegral = -PID_integralLimit;
                     double yForce = kp * yError + ki * g_yErrorIntegral - kd * yVelocity;
 
                     // Z-axis PID control
                     double zError = g_filteredTargetZ - pos[2];
-                    double zVelocity = (pos[2] - g_lastPidPos[2]) / deltaSeconds;
-                    g_zErrorIntegral += zError * deltaSeconds;
+                    double zVelocity = (pos[2] - g_lastPidPos[2]) * invDt;
+                    g_zErrorIntegral += zError * dt;
                     if (g_zErrorIntegral > PID_integralLimit) g_zErrorIntegral = PID_integralLimit;
                     if (g_zErrorIntegral < -PID_integralLimit) g_zErrorIntegral = -PID_integralLimit;
                     double zForce = kp * zError + ki * g_zErrorIntegral - kd * zVelocity;
@@ -492,6 +526,15 @@ FALCON_API void ShutdownFalcon()
         g_successfulLoops.store(0);
         g_calibrating.store(false);
         g_calibrated.store(false);
+        g_targetStartX.store(0.0);
+        g_targetStartY.store(0.0);
+        g_targetStartZ.store(0.0);
+        g_targetBlendDuration.store(0.02);
+        g_targetBlendStartNs.store(0);
+        g_targetInitialized.store(false);
+        g_filteredTargetX = 0.0;
+        g_filteredTargetY = 0.0;
+        g_filteredTargetZ = 0.0;
 
         // Reset position cache
         {
@@ -560,6 +603,44 @@ FALCON_API void StartCalibration()
 
 FALCON_API void SetTargetPosition(float x, float y, float z)
 {
+    auto now = std::chrono::steady_clock::now();
+    long long nowNs = std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count();
+
+    double newX = static_cast<double>(x);
+    double newY = static_cast<double>(y);
+    double newZ = static_cast<double>(z);
+
+    double prevGoalX = static_cast<double>(g_targetX.load());
+    double prevGoalY = static_cast<double>(g_targetY.load());
+    double prevGoalZ = static_cast<double>(g_targetZ.load());
+
+    long long prevStartNs = g_targetBlendStartNs.load();
+    double prevDuration = g_targetBlendDuration.load();
+
+    if (!g_targetInitialized.load())
+    {
+        g_targetStartX.store(newX);
+        g_targetStartY.store(newY);
+        g_targetStartZ.store(newZ);
+        g_targetBlendDuration.store(0.0);
+        g_targetBlendStartNs.store(nowNs);
+        g_targetInitialized.store(true);
+    }
+    else
+    {
+        double elapsed = prevStartNs > 0 ? (nowNs - prevStartNs) * 1e-9 : prevDuration;
+        if (elapsed < 0.001 || elapsed > 0.2)
+        {
+            elapsed = 0.02;  // default to 20 ms when timing is out of bounds
+        }
+
+        g_targetStartX.store(prevGoalX);
+        g_targetStartY.store(prevGoalY);
+        g_targetStartZ.store(prevGoalZ);
+        g_targetBlendDuration.store(elapsed);
+        g_targetBlendStartNs.store(nowNs);
+    }
+
     g_targetX.store(x);
     g_targetY.store(y);
     g_targetZ.store(z);
@@ -574,10 +655,24 @@ FALCON_API void EnablePositionControl(bool enable)
         g_yErrorIntegral = 0.0;
         g_zErrorIntegral = 0.0;
 
+        auto now = std::chrono::steady_clock::now();
+        long long nowNs = std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count();
+
+        double currentGoalX = static_cast<double>(g_targetX.load());
+        double currentGoalY = static_cast<double>(g_targetY.load());
+        double currentGoalZ = static_cast<double>(g_targetZ.load());
+
+        g_targetStartX.store(currentGoalX);
+        g_targetStartY.store(currentGoalY);
+        g_targetStartZ.store(currentGoalZ);
+        g_targetBlendDuration.store(0.0);
+        g_targetBlendStartNs.store(nowNs);
+        g_targetInitialized.store(true);
+
         // Initialize filtered targets to current target
-        g_filteredTargetX = static_cast<double>(g_targetX.load());
-        g_filteredTargetY = static_cast<double>(g_targetY.load());
-        g_filteredTargetZ = static_cast<double>(g_targetZ.load());
+        g_filteredTargetX = currentGoalX;
+        g_filteredTargetY = currentGoalY;
+        g_filteredTargetZ = currentGoalZ;
 
         // Initialize last position
         {
@@ -593,6 +688,11 @@ FALCON_API void EnablePositionControl(bool enable)
     }
 
     g_positionControlEnabled.store(enable);
+
+    if (!enable)
+    {
+        g_targetInitialized.store(false);
+    }
 }
 
 FALCON_API void SetPIDParameters(float kp, float ki, float kd, float filterAlpha, float maxForce)
