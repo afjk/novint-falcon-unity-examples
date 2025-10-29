@@ -188,6 +188,10 @@ Attach it alongside `FalconController` (with a small sphere assigned to `playbac
   2. Ensure the Falcon is calibrated (LED green) and press Play.
   3. Hold button 3 to record a path, release to stop.
   4. Press button 1 to start looping playback (LED turns blue), press again to stop (LED returns green).
+- **FalconTextureTestScene.unity** – contact-texture sandbox driven by the native 1 kHz loop. Includes:
+  - A textured block, sphere, and Stanford bunny MeshCollider placed within the Falcon workspace.
+  - `FalconTextureContact` exposing native spring/damping parameters for fine-tuning.
+  - Bunny model sourced from [Stanford Graphics Lab](https://graphics.stanford.edu/~mdfisher/Data/Meshes/bunny.obj).
 
 ## Force Model
 
