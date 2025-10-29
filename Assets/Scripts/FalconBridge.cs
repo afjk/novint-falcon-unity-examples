@@ -54,6 +54,18 @@ public static class FalconBridge
     public static extern void SetContact(float nx, float ny, float nz, float depth);
 
     /// <summary>
+    /// Set the native spring constant (N/m) used for contact forces.
+    /// </summary>
+    [DllImport(LIBRARY_NAME, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void SetContactStiffness(float stiffness);
+
+    /// <summary>
+    /// Set the native damping gain (N·s/m) applied along the contact normal.
+    /// </summary>
+    [DllImport(LIBRARY_NAME, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void SetContactDamping(float damping);
+
+    /// <summary>
     /// Check if the Falcon device is calibrated (homed).
     /// </summary>
     /// <returns>True if calibrated, false otherwise</returns>

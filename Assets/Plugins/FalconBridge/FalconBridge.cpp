@@ -26,9 +26,11 @@ static std::atomic<float> g_nx(0.0f);
 static std::atomic<float> g_ny(0.0f);
 static std::atomic<float> g_nz(0.0f);
 static std::atomic<float> g_depth(0.0f);
+static std::atomic<bool> g_contactActive(false);
 
 // Force model parameters
-static const float K = 3000.0f;  // Spring stiffness
+static std::atomic<double> g_contactStiffness(3000.0);  // Spring stiffness (N/m)
+static std::atomic<double> g_contactDamping(0.6);       // Damping gain (N·s/m)
 static const float FMAX = 3.0f;  // Maximum force (Newtons)
 
 // IO loop failure tracking
@@ -91,6 +93,8 @@ static void HapticLoop()
 {
     static auto lastLoopTime = std::chrono::steady_clock::now();
     constexpr double kNominalDt = 1.0 / 1000.0;  // 1 kHz nominal timestep
+    static std::array<double, 3> prevContactPos = {0.0, 0.0, 0.0};
+    static bool prevContactPosValid = false;
 
     while (g_running)
     {
@@ -296,33 +300,59 @@ static void HapticLoop()
                 else
                 {
                     // Contact-based haptic feedback mode
-                    float n[3] = {
-                        g_nx.load(),
-                        g_ny.load(),
-                        g_nz.load()
-                    };
-                    float d = g_depth.load();
+                    force = {0.0, 0.0, 0.0};
 
-                    // Calculate force: F = -k * depth * n
-                    force = {
-                        -K * d * n[0],
-                        -K * d * n[1],
-                        -K * d * n[2]
-                    };
-
-                    // Clamp force to maximum magnitude
-                    double forceMagnitude = std::sqrt(
-                        force[0] * force[0] +
-                        force[1] * force[1] +
-                        force[2] * force[2]
-                    );
-
-                    if (forceMagnitude > FMAX && forceMagnitude > 0.0)
+                    if (g_contactActive.load())
                     {
-                        double scale = FMAX / forceMagnitude;
-                        force[0] *= scale;
-                        force[1] *= scale;
-                        force[2] *= scale;
+                        std::array<double, 3> n = {
+                            static_cast<double>(g_nx.load()),
+                            static_cast<double>(g_ny.load()),
+                            static_cast<double>(g_nz.load())
+                        };
+                        double depth = static_cast<double>(g_depth.load());
+
+                        double nMag = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+                        if (nMag > 1e-6 && depth > 0.0)
+                        {
+                            n[0] /= nMag;
+                            n[1] /= nMag;
+                            n[2] /= nMag;
+
+                            std::array<double, 3> velocity = {0.0, 0.0, 0.0};
+                            if (prevContactPosValid)
+                            {
+                                velocity[0] = (pos[0] - prevContactPos[0]) * invDt;
+                                velocity[1] = (pos[1] - prevContactPos[1]) * invDt;
+                                velocity[2] = (pos[2] - prevContactPos[2]) * invDt;
+                            }
+                            prevContactPos = pos;
+                            prevContactPosValid = true;
+
+                            double velAlongNormal = velocity[0] * n[0] + velocity[1] * n[1] + velocity[2] * n[2];
+                            double springMag = g_contactStiffness.load() * depth;
+                            double dampingMag = g_contactDamping.load() * velAlongNormal;
+                            double magnitude = springMag + dampingMag;
+                            if (magnitude < 0.0)
+                            {
+                                magnitude = 0.0;
+                            }
+                            if (magnitude > FMAX)
+                            {
+                                magnitude = FMAX;
+                            }
+
+                            force[0] = -magnitude * n[0];
+                            force[1] = -magnitude * n[1];
+                            force[2] = -magnitude * n[2];
+                        }
+                        else
+                        {
+                            prevContactPosValid = false;
+                        }
+                    }
+                    else
+                    {
+                        prevContactPosValid = false;
                     }
                 }
 
@@ -535,6 +565,7 @@ FALCON_API void ShutdownFalcon()
         g_filteredTargetX = 0.0;
         g_filteredTargetY = 0.0;
         g_filteredTargetZ = 0.0;
+        g_contactActive.store(false);
 
         // Reset position cache
         {
@@ -587,6 +618,30 @@ FALCON_API void SetContact(float nx, float ny, float nz, float depth)
     g_ny.store(ny);
     g_nz.store(nz);
     g_depth.store(depth);
+    if (depth > 0.0f && (nx * nx + ny * ny + nz * nz) > 1e-6f)
+    {
+        g_contactActive.store(true);
+    }
+    else
+    {
+        g_contactActive.store(false);
+    }
+}
+
+FALCON_API void SetContactStiffness(float stiffness)
+{
+    float clamped = stiffness;
+    if (clamped < 100.0f) clamped = 100.0f;
+    if (clamped > 8000.0f) clamped = 8000.0f;
+    g_contactStiffness.store(static_cast<double>(clamped));
+}
+
+FALCON_API void SetContactDamping(float damping)
+{
+    float clamped = damping;
+    if (clamped < 0.0f) clamped = 0.0f;
+    if (clamped > 8.0f) clamped = 8.0f;
+    g_contactDamping.store(static_cast<double>(clamped));
 }
 
 FALCON_API bool IsCalibrated()

@@ -61,7 +61,16 @@ public class FalconTextureContact : MonoBehaviour
 
     [Tooltip("Time constant in seconds for depth smoothing (0 = no smoothing)")]
     [Range(0f, 0.2f)]
-    public float depthSmoothingTime = 0.04f;
+   public float depthSmoothingTime = 0.04f;
+
+    [Header("Native Force Response")]
+    [Tooltip("Spring stiffness used by the native 1 kHz loop (N/m)")]
+    [Range(200f, 6000f)]
+    public float nativeSpring = 3000f;
+
+    [Tooltip("Damping gain used by the native 1 kHz loop (N·s/m)")]
+    [Range(0f, 6f)]
+    public float nativeDamping = 0.6f;
 
     [Header("Debug")]
     public bool showDebugGizmos = false;
@@ -93,11 +102,21 @@ public class FalconTextureContact : MonoBehaviour
         probeTransform = probeGO.transform;
     }
 
+    void OnEnable()
+    {
+        ApplyNativeResponseSettings();
+    }
+
     void OnValidate()
     {
         if (probeCollider != null)
         {
             probeCollider.radius = probeRadius;
+        }
+
+        if (Application.isPlaying)
+        {
+            ApplyNativeResponseSettings();
         }
     }
 
@@ -260,7 +279,7 @@ public class FalconTextureContact : MonoBehaviour
         if (showDebugGizmos)
         {
             debugContactPoint = contactPoint;
-            debugContactNormal = outputNormal;
+            debugContactNormal = new Vector3(-deviceNormal.x, -deviceNormal.y, deviceNormal.z);
         }
     }
 
@@ -281,6 +300,12 @@ public class FalconTextureContact : MonoBehaviour
             return 1f;
         float safeTime = Mathf.Max(timeConstant, 1e-4f);
         return 1f - Mathf.Exp(-deltaTime / safeTime);
+    }
+
+    private void ApplyNativeResponseSettings()
+    {
+        FalconBridge.SetContactStiffness(Mathf.Clamp(nativeSpring, 200f, 6000f));
+        FalconBridge.SetContactDamping(Mathf.Clamp(nativeDamping, 0f, 6f));
     }
 
     void OnDisable()

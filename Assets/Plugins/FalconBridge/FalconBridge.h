@@ -38,6 +38,18 @@ FALCON_API bool GetToolPose(float* x, float* y, float* z);
 FALCON_API void SetContact(float nx, float ny, float nz, float depth);
 
 /**
+ * Adjust the native spring constant used for contact forces.
+ * @param stiffness Spring stiffness (N/m)
+ */
+FALCON_API void SetContactStiffness(float stiffness);
+
+/**
+ * Adjust the native damping term used for contact forces.
+ * @param damping Damping gain (N·s/m)
+ */
+FALCON_API void SetContactDamping(float damping);
+
+/**
  * Check if the Falcon device is calibrated (homed).
  * @return true if calibrated, false otherwise
  */
